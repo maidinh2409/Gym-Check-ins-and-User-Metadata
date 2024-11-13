@@ -1,9 +1,19 @@
--- Dataset: Gym Check-ins and User Metadata
--- Source: https://www.kaggle.com/datasets/mexwell/gym-check-ins-and-user-metadata
--- Queried using: MySQL Workbench
+create database gym_data;
 
--- create table & load csv into database
 use gym_data;
+drop table user_data;
+create table user_data (
+	user_id varchar(15) primary key,
+    first_name varchar(20),
+    last_name varchar(20),
+    age int,
+    gender varchar (15),
+	birthdate varchar(20),
+    signup_date varchar(20),
+    user_location varchar(20),
+	subscription_plan varchar(20)
+);
+
 create table checkin_out (
 	user_id	varchar(15),
     gym_id	varchar(15),
@@ -13,17 +23,28 @@ create table checkin_out (
     calories_burned int
 );
 
+create table locations (
+	gym_id	varchar(15) primary key,
+    location	varchar(20),
+    gym_type	varchar(20),
+    facilities varchar(50)
+);
+
+create table subscription_plan (
+	subscription_plan	varchar(15),
+    price_per_month	float,
+    features varchar(150)
+);
+select * from user_data;
+
 -- sample of loading one table to db
-LOAD DATA INFILE 'C:/ProgramData/MySQL/MySQL Server 8.0/Uploads/checkin_checkout_history_updated.csv' 
-INTO TABLE checkin_out
+LOAD DATA INFILE 'C:/ProgramData/MySQL/MySQL Server 8.4/Uploads/subscription_plans.csv' 
+INTO TABLE subscription_plan
 FIELDS TERMINATED BY ',' 
 OPTIONALLY ENCLOSED BY '"'
 LINES TERMINATED BY '\n'
 IGNORE 1 ROWS;
 
-
-
--- DATA MODELLING
 -- Create the checkin_id field for the checkin_out table, as the primary key
 use gym_data;
 alter table checkin_out
@@ -88,21 +109,11 @@ modify column checkout_time datetime;
 	alter table user_data
 	drop column birthdate,
 	drop column sign_up_date;
-
-
--- Detect hidden characters causing data in the user_data table to not match data in the subscription_plan table
-SELECT DISTINCT subscription
-FROM user_data
-WHERE subscription LIKE '%\r%' OR subscription LIKE '%\n%' OR subscription LIKE '%\t%';
-
--- Encode the subscriptionCode column for subscription to standardize it to match the values in the subscription_plan table
+    
 
 use gym_data;
 alter table user_data
 add column subscriptionCode varchar(10);
-
-alter table subscription_plan
-drop primary key;
 
 alter table subscription_plan
 add column subscriptionCode varchar(10);
@@ -110,15 +121,15 @@ add column subscriptionCode varchar(10);
 -- Encode the subscription_plan table
 UPDATE subscription_plan
 SET subscriptionCode = 'PLAN01'
-WHERE REPLACE(REPLACE(REPLACE(sub_plan, '\r', ''), '\n', ''), '\t', '') = 'Basic';
+WHERE REPLACE(REPLACE(REPLACE(subscription_plan, '\r', ''), '\n', ''), '\t', '') = 'Basic';
 
 UPDATE subscription_plan
 SET subscriptionCode = 'PLAN02'
-WHERE REPLACE(REPLACE(REPLACE(sub_plan, '\r', ''), '\n', ''), '\t', '') = 'Pro';
+WHERE REPLACE(REPLACE(REPLACE(subscription_plan, '\r', ''), '\n', ''), '\t', '') = 'Pro';
 
 UPDATE subscription_plan
 SET subscriptionCode = 'PLAN03'
-WHERE REPLACE(REPLACE(REPLACE(sub_plan, '\r', ''), '\n', ''), '\t', '') = 'Student';
+WHERE REPLACE(REPLACE(REPLACE(subscription_plan, '\r', ''), '\n', ''), '\t', '') = 'Student';
 
 alter table subscription_plan
 add constraint PK_subscription_plan PRIMARY KEY (subscriptionCode);
@@ -149,17 +160,8 @@ add constraint FK1_checkin_out FOREIGN KEY (user_id) references user_data(user_i
 add constraint FK2_checkin_out FOREIGN KEY (gym_id) references locations(gym_id);
 
 use gym_data;
-alter table subscription_plan
-modify column subscription_plan varchar(15),
-add constraint PK_subscription_plan PRIMARY KEY(subscription_plan);
-
-use gym_data;
 alter table user_data
 add constraint FK1_user_data foreign key(subscriptionCode) references subscription_plan(subscriptionCode);
-
-
-
-
 
 ## ANALYTICS QUESTIONS?
 
@@ -253,5 +255,4 @@ join user_data as u on u.user_id = c.user_id
 group by c.user_id, `Full Name`
 order by `Total hours spent` desc
 limit 10;
-
 
