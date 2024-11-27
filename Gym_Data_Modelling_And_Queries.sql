@@ -205,6 +205,34 @@ join subscription_plan as p on p.subscriptionCode = u.subscriptionCode
 group by u.user_location
 order by 2 desc;
 
+	-- Total revenue in a given period of time
+
+delimiter $$   
+CREATE FUNCTION FNC_TOTAL_REV (
+	startDate DATE,
+    endDate DATE
+) RETURNS DECIMAL (18,2)
+DETERMINISTIC
+READS SQL DATA
+BEGIN
+	DECLARE totalRev DECIMAL (18,2) default 0;
+    
+    SELECT SUM(
+		s.price_per_month * TIMESTAMPDIFF(Month, u.signup_date, endDate)
+    ) into totalRev
+    from user_data as u
+    join subscription_plan as s on s.subscriptionCode = u.subscriptionCode
+    where u.signup_date >= startDate
+    and u.signup_date <= endDate;
+    
+	RETURN totalRev;
+END $$
+
+delimiter ;
+
+select CONCAT("$", FORMAT(FNC_TOTAL_REV ('2022-01-01', CURDATE()), 2)) as Total_Revenue;
+
+
 -- Which customer segment is the most popular?
 
 	-- By age group
@@ -255,4 +283,5 @@ join user_data as u on u.user_id = c.user_id
 group by c.user_id, `Full Name`
 order by `Total hours spent` desc
 limit 10;
+
 
