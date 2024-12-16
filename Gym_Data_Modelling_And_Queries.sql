@@ -169,24 +169,37 @@ add constraint FK1_user_data foreign key(subscriptionCode) references subscripti
 	-- Assume that the user's subscription is calculated from the month the user starts their subscription until the present.
 	-- Assume that no user cancels their subscription
 
-select
-	u.user_id,
-	u.signup_date,
-	timestampdiff(MONTH,  u.signup_date, current_date()) as `monthNum`,
-    p.price_per_month,
-    ROUND((timestampdiff(MONTH,  u.signup_date, current_date()) * p.price_per_month),2) as `TotalRevByUser`,
-    p.sub_plan
-from user_data as u
-join subscription_plan as p on p.subscriptionCode = u.subscriptionCode
-order by 1;
-;
 
-	-- Total revenue 
-select 
-	CONCAT('$', FORMAT(SUM(timestampdiff(MONTH,  u.signup_date, current_date()) * p.price_per_month), 2)) as `Total Revenue`
-from user_data as u
-join subscription_plan as p on p.subscriptionCode = u.subscriptionCode;
-	
+	-- Monthly Revenue
+		-- Monthly revenue = revenue from new users;
+		-- Cummulative revenue over months = total monthly revenue
+			-- --> TOTAL REVENUE OVER TIME = SUM(Cummulative revenue over months)
+WITH MonthlyRevenue AS (
+    SELECT 
+        YEAR(u.signup_date) AS `year`,
+        MONTH(u.signup_date) AS `month`,
+        SUM(p.price_per_month) AS monthly_revenue
+    FROM user_data AS u
+    JOIN subscription_plan AS p 
+        ON p.subscriptionCode = u.subscriptionCode
+    WHERE u.signup_date BETWEEN '2020-01-01' AND CURDATE()  
+    GROUP BY YEAR(u.signup_date), MONTH(u.signup_date)
+)
+SELECT 
+    mr.year,
+    mr.month,
+    CONCAT(mr.year, mr.month),
+    mr.monthly_revenue,
+    -- Cumulative revenue: Doanh thu tích lũy là doanh thu tháng trước cộng với doanh thu của tháng này
+    (SELECT SUM(mr1.monthly_revenue)
+     FROM MonthlyRevenue mr1
+     WHERE mr1.year < mr.year OR (mr1.year = mr.year AND mr1.month <= mr.month)
+    ) AS cumulative_revenue
+FROM MonthlyRevenue mr
+ORDER BY mr.year, mr.month;
+	-- Monthly Revenue
+    
+
 	-- Total revenue by Subscription plan
 
 select 
@@ -197,41 +210,105 @@ join subscription_plan as p on p.subscriptionCode = u.subscriptionCode
 group by p.sub_plan;
 
 	-- Total revenue by user_locations
-select 
-	u.user_location,
-    CONCAT('$', FORMAT(SUM(timestampdiff(MONTH,  u.signup_date, current_date()) * p.price_per_month), 2)) as `Total Revenue`
-from user_data as u
-join subscription_plan as p on p.subscriptionCode = u.subscriptionCode
-group by u.user_location
-order by 2 desc;
+SELECT
+    SUM(c.TotalRevenue) AS TotalRevenueSum
+FROM (
+    SELECT 
+        u.user_location,
+        SUM((TIMESTAMPDIFF(MONTH, u.signup_date, '2023-10-31') + 1) * p.price_per_month) AS TotalRevenue
+    FROM user_data AS u
+    JOIN subscription_plan AS p 
+        ON p.subscriptionCode = u.subscriptionCode
+    GROUP BY u.user_location
+) AS c;
+
+    SELECT 
+        u.user_location,
+        u.subscriptionCode,
+        p.subscription_plan,
+        SUM((TIMESTAMPDIFF(MONTH, u.signup_date, '2023-10-31') + 1) * p.price_per_month) AS TotalRevenue
+    FROM user_data AS u
+    JOIN subscription_plan AS p 
+        ON p.subscriptionCode = u.subscriptionCode
+    GROUP BY u.user_location, u.subscriptionCode;
+
 
 	-- Total revenue in a given period of time
+    
+drop function FNC_TOTAL_REV;
 
-delimiter $$   
+DELIMITER $$
+
 CREATE FUNCTION FNC_TOTAL_REV (
-	startDate DATE,
+    startDate DATE,
     endDate DATE
-) RETURNS DECIMAL (18,2)
+) RETURNS DECIMAL(18,2)
 DETERMINISTIC
 READS SQL DATA
 BEGIN
-	DECLARE totalRev DECIMAL (18,2) default 0;
-    
-    SELECT SUM(
-		s.price_per_month * TIMESTAMPDIFF(Month, u.signup_date, endDate)
-    ) into totalRev
-    from user_data as u
-    join subscription_plan as s on s.subscriptionCode = u.subscriptionCode
-    where u.signup_date >= startDate
-    and u.signup_date <= endDate;
-    
-	RETURN totalRev;
+    DECLARE totalRev DECIMAL(18,2) DEFAULT 0;
+
+    SET totalRev = (
+        SELECT SUM(cumulative_revenue)
+        FROM (
+            SELECT 
+                mr.year,
+                mr.month,
+                mr.monthly_revenue,
+                (SELECT SUM(mr1.monthly_revenue)
+                 FROM (
+                    SELECT 
+                        YEAR(u.signup_date) AS `year`,
+                        MONTH(u.signup_date) AS `month`,
+                        SUM(p.price_per_month) AS monthly_revenue
+                    FROM user_data AS u
+                    JOIN subscription_plan AS p 
+                        ON p.subscriptionCode = u.subscriptionCode
+                    WHERE u.signup_date BETWEEN startDate AND endDate
+                    GROUP BY YEAR(u.signup_date), MONTH(u.signup_date)
+                 ) AS mr1
+                 WHERE mr1.year < mr.year OR (mr1.year = mr.year AND mr1.month <= mr.month)
+                ) AS cumulative_revenue
+            FROM (
+                SELECT 
+                    YEAR(u.signup_date) AS `year`,
+                    MONTH(u.signup_date) AS `month`,
+                    SUM(p.price_per_month) AS monthly_revenue
+                FROM user_data AS u
+                JOIN subscription_plan AS p 
+                    ON p.subscriptionCode = u.subscriptionCode
+                WHERE u.signup_date BETWEEN startDate AND endDate
+                GROUP BY YEAR(u.signup_date), MONTH(u.signup_date)
+            ) AS mr
+        ) AS cumulativeResults
+    );
+
+    RETURN totalRev;
 END $$
 
-delimiter ;
+DELIMITER ;
 
-select CONCAT("$", FORMAT(FNC_TOTAL_REV ('2022-01-01', CURDATE()), 2)) as Total_Revenue;
 
+SELECT FNC_TOTAL_REV('2021-01-01', curdate()) AS TotalRevenue;
+
+	-- Revenue by locations
+	SELECT 
+			u.user_location,
+			SUM((TIMESTAMPDIFF(MONTH, u.signup_date, '2023-10-31') + 1) * p.price_per_month) AS TotalRevenue
+		FROM user_data AS u
+		JOIN subscription_plan AS p 
+			ON p.subscriptionCode = u.subscriptionCode
+		GROUP BY u.user_location;
+    
+    -- Revenue by plan
+    
+    SELECT
+        u.subscriptionCode,
+        SUM((TIMESTAMPDIFF(MONTH, u.signup_date, '2023-10-31') + 1) * p.price_per_month) AS TotalRevenue
+    FROM user_data AS u
+    JOIN subscription_plan AS p 
+        ON p.subscriptionCode = u.subscriptionCode
+    GROUP BY u.subscriptionCode;
 
 -- Which customer segment is the most popular?
 
@@ -272,7 +349,7 @@ select CONCAT("$", FORMAT(FNC_TOTAL_REV ('2022-01-01', CURDATE()), 2)) as Total_
 	order by `Total checkin` desc;
     
 -- Who are the top 10 customers who have spent the most time working out?
-
+use gym_data;
 select 
 	c.user_id,
     concat(u.first_name, " ", u.last_name) as `Full Name`,
@@ -283,5 +360,6 @@ join user_data as u on u.user_id = c.user_id
 group by c.user_id, `Full Name`
 order by `Total hours spent` desc
 limit 10;
+
 
 
